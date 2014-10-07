@@ -40,27 +40,46 @@ public class LibraryModel {
 		ResultSet r = null;
 		try {
 			r = query(String.format("SELECT * FROM book WHERE isbn = '%d'", isbn));
-			StringBuilder out = new StringBuilder("Book lookup:\n");
-			while(r.next()) {
-				out.append(String.format("%d: %s (Edition %d)\nCopies: %d (%d left)\n",
-						r.getInt("isbn"), r.getString("title"), r.getInt("edition_no"), r.getInt("numofcop"), r.getInt("numleft")));
-				
-				//Get authors
-				ResultSet ar = query(String.format("SELECT a.name, a.surname FROM book_author b, author a WHERE b.isbn = '%d' AND a.authorid = b.authorid", isbn));
-				StringBuilder authors = new StringBuilder("Author/s: ");
-				
-				boolean auth = false; //Any authors?
-				while(ar.next()) {
-					authors.append(String.format("%s%s", (auth ? ", " : ""), ar.getString("surname").trim()));
-					auth = true;
-				}
-				
-				if(auth)
-					out.append(authors);
-				else
-					out.append("No authors.");
-			}
+			r.next();
+			return bookLookupFormat(r);
+			
+		} catch (SQLException e) {
+			showExceptionDialog(String.format("There was an error executing the query: %s", e.toString()));
+			return "Database error.";
+		}
+	}
+	
+	private String bookLookupFormat(ResultSet r) throws SQLException {
+		StringBuilder out = new StringBuilder("Book lookup:\n");
+		out.append(String.format("%d: %s\nEdition %d - Copies: %d (%d left)\n",
+				r.getInt("isbn"), r.getString("title").trim(), r.getInt("edition_no"), r.getInt("numofcop"), r.getInt("numleft")));
+		
+		out.append(getAuthors(r.getInt("isbn")));
 
+		return out.toString();
+	}
+	
+	private String getAuthors(int isbn) throws SQLException {
+		ResultSet ar = query(String.format("SELECT a.name, a.surname FROM book_author b, author a WHERE b.isbn = '%d' AND a.authorid = b.authorid", isbn));
+		StringBuilder authors = new StringBuilder("Author/s: ");
+		
+		boolean auth = false; //Any authors?
+		while(ar.next()) {
+			authors.append(String.format("%s%s", (auth ? ", " : ""), ar.getString("surname").trim()));
+			auth = true;
+		}
+		
+		return (auth ? authors.toString() : "No authors.");
+	}
+
+	public String showCatalogue() {
+		ResultSet r = null;
+		try {
+			r = query("SELECT * FROM book");
+			StringBuilder out = new StringBuilder("Catalogue:\n");
+			while(r.next()) {
+				out.append(String.format("%s\n\n", bookLookupFormat(r)));
+			}
 			return out.toString();
 		} catch (SQLException e) {
 			showExceptionDialog(String.format("There was an error executing the query: %s", e.toString()));
@@ -68,12 +87,8 @@ public class LibraryModel {
 		}
 	}
 
-	public String showCatalogue() {
-		return "Show Catalogue Stub";
-	}
-
 	public String showLoanedBooks() {
-		return "Show Loaned Books Stub";
+		return "stub";
 	}
 
 	public String showAuthor(int authorID) {
