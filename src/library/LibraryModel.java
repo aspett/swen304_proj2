@@ -7,91 +7,149 @@ package library;
 
 
 
-import java.io.IOException;
+import static javax.swing.JOptionPane.ERROR_MESSAGE;
+import static javax.swing.JOptionPane.showMessageDialog;
+
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.util.Properties;
+import java.sql.Statement;
 
 import javax.swing.JFrame;
-
-import org.postgresql.core.Logger;
-import org.postgresql.core.PGStream;
-import org.postgresql.gss.MakeGSS;
-import org.postgresql.util.HostSpec;
+import javax.swing.JOptionPane;
 
 public class LibraryModel {
 
-    // For use in creating dialogs and making them modal
-    private JFrame dialogParent;
+	// For use in creating dialogs and making them modal
+	private JFrame dialogParent;
+	private Connection con;
 
-    public LibraryModel(JFrame parent, String userid, String password) {
-	dialogParent = parent;
+	public LibraryModel(JFrame parent, String userid, String password) {
+		dialogParent = parent;
 		try {
 			Class.forName("org.postgresql.Driver");
-			Connection con = DriverManager.getConnection("jdbc:postgresql://db.ecs.vuw.ac.nz/pettandr_jdbc", userid, password);
+			con = DriverManager.getConnection("jdbc:postgresql://localhost:5432/pettandr_jdbc", "andrew", "123456");
 		} catch (SQLException | ClassNotFoundException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-			System.out.println(e.getMessage());
-			try {
-				throw e.getCause();
-			} catch (Throwable e1) {
-				// TODO Auto-generated catch block
-				e1.printStackTrace();
-			}
+			showExceptionDialog(e);
+			exit();
 		}
-    }
+	}
 
-    public String bookLookup(int isbn) {
-	return "Lookup Book Stub";
-    }
+	public String bookLookup(int isbn) {
+		ResultSet r = null;
+		try {
+			r = query(String.format("SELECT * FROM book WHERE isbn = '%d'", isbn));
+			StringBuilder out = new StringBuilder("Book lookup:\n");
+			while(r.next()) {
+				out.append(String.format("%d: %s (Edition %d)\nCopies: %d (%d left)\n",
+						r.getInt("isbn"), r.getString("title"), r.getInt("edition_no"), r.getInt("numofcop"), r.getInt("numleft")));
+				
+				//Get authors
+				ResultSet ar = query(String.format("SELECT a.name, a.surname FROM book_author b, author a WHERE b.isbn = '%d' AND a.authorid = b.authorid", isbn));
+				StringBuilder authors = new StringBuilder("Author/s: ");
+				
+				boolean auth = false; //Any authors?
+				while(ar.next()) {
+					authors.append(String.format("%s%s", (auth ? ", " : ""), ar.getString("surname").trim()));
+					auth = true;
+				}
+				
+				if(auth)
+					out.append(authors);
+				else
+					out.append("No authors.");
+			}
 
-    public String showCatalogue() {
-	return "Show Catalogue Stub";
-    }
+			return out.toString();
+		} catch (SQLException e) {
+			showExceptionDialog(String.format("There was an error executing the query: %s", e.toString()));
+			return "Database error.";
+		}
+	}
 
-    public String showLoanedBooks() {
-	return "Show Loaned Books Stub";
-    }
+	public String showCatalogue() {
+		return "Show Catalogue Stub";
+	}
 
-    public String showAuthor(int authorID) {
-	return "Show Author Stub";
-    }
+	public String showLoanedBooks() {
+		return "Show Loaned Books Stub";
+	}
 
-    public String showAllAuthors() {
-	return "Show All Authors Stub";
-    }
+	public String showAuthor(int authorID) {
+		return "Show Author Stub";
+	}
 
-    public String showCustomer(int customerID) {
-	return "Show Customer Stub";
-    }
+	public String showAllAuthors() {
+		return "Show All Authors Stub";
+	}
 
-    public String showAllCustomers() {
-	return "Show All Customers Stub";
-    }
+	public String showCustomer(int customerID) {
+		return "Show Customer Stub";
+	}
 
-    public String borrowBook(int isbn, int customerID,
-			     int day, int month, int year) {
-	return "Borrow Book Stub";
-    }
+	public String showAllCustomers() {
+		return "Show All Customers Stub";
+	}
 
-    public String returnBook(int isbn, int customerid) {
-	return "Return Book Stub";
-    }
+	public String borrowBook(int isbn, int customerID,
+			int day, int month, int year) {
+		return "Borrow Book Stub";
+	}
 
-    public void closeDBConnection() {
-    }
+	public String returnBook(int isbn, int customerid) {
+		return "Return Book Stub";
+	}
 
-    public String deleteCus(int customerID) {
-    	return "Delete Customer";
-    }
+	public void closeDBConnection() {
+		try {
+			con.close();
+		} catch (SQLException e) {
+			showExceptionDialog(e);
+		}
+	}
 
-    public String deleteAuthor(int authorID) {
-    	return "Delete Author";
-    }
+	public String deleteCus(int customerID) {
+		return "Delete Customer";
+	}
 
-    public String deleteBook(int isbn) {
-    	return "Delete Book";
-    }
+	public String deleteAuthor(int authorID) {
+		return "Delete Author";
+	}
+
+	public String deleteBook(int isbn) {
+		return "Delete Book";
+	}
+	
+	private void showExceptionDialog(Exception e) {
+		showExceptionDialog(e.toString());
+	}
+	
+	private void showExceptionDialog(String s) {
+		showMessageDialog(dialogParent,
+				s,
+				"Error performing action",
+				ERROR_MESSAGE);
+	}
+	
+	private void showNoticeDialog(String s) {
+		showMessageDialog(dialogParent,
+				s,
+				"Error performing action",
+				JOptionPane.INFORMATION_MESSAGE);
+	}
+	
+	private ResultSet query(String query) throws SQLException {
+		Statement st = con.createStatement();
+		return st.executeQuery(query);
+	}
+	
+	private int update(String query) throws SQLException {
+		Statement st = con.createStatement();
+		return st.executeUpdate(query);
+	}
+	
+	private void exit() {
+		System.exit(0);
+	}
 }
