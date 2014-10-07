@@ -51,10 +51,10 @@ public class LibraryModel {
 	
 	private String bookLookupFormat(ResultSet r) throws SQLException {
 		StringBuilder out = new StringBuilder("Book lookup:\n");
-		out.append(String.format("%d: %s\nEdition %d - Copies: %d (%d left)\n",
+		out.append(String.format("\t%d: %s\nEdition %d - Copies: %d (%d left)\n\t",
 				r.getInt("isbn"), r.getString("title").trim(), r.getInt("edition_no"), r.getInt("numofcop"), r.getInt("numleft")));
 		
-		out.append(getAuthors(r.getInt("isbn")));
+		out.append("\t" + getAuthors(r.getInt("isbn")));
 
 		return out.toString();
 	}
@@ -92,11 +92,47 @@ public class LibraryModel {
 	}
 
 	public String showAuthor(int authorID) {
-		return "Show Author Stub";
+		ResultSet r = null;
+		try {
+			r = query(String.format("SELECT * FROM author WHERE authorid = %d", authorID));
+			StringBuilder out = new StringBuilder("Show Author:\n");
+			while(r.next()) {
+				out.append(String.format("\t%d - %s %s\n\tBook/s written:\n%s\n", 
+						r.getInt("authorid"), r.getString("name").trim(), r.getString("surname").trim(), booksWritten(r.getInt("authorid"))));
+			}
+			return out.toString();
+		} catch (SQLException e) {
+			showExceptionDialog(String.format("There was an error executing the query: %s", e.toString()));
+			return "Database error.";
+		}
+	}
+	
+	private String booksWritten(int authorID) throws SQLException {
+		ResultSet r = null;
+		StringBuilder out = new StringBuilder();
+		boolean any = false;
+		r = query(String.format("SELECT isbn, title, edition_no FROM book NATURAL JOIN book_author WHERE authorid = %d", authorID));
+		while(r.next()) {
+			any = true;
+			out.append(String.format("\t\t%d - %s (Ed. %d)\n", r.getInt(1), r.getString(2).trim(), r.getInt(3)));
+		}
+		return any ? out.toString() : "\t\tNone";
 	}
 
 	public String showAllAuthors() {
-		return "Show All Authors Stub";
+		ResultSet r = null;
+		try {
+			r = query("SELECT * FROM author");
+			StringBuilder out = new StringBuilder("Show All Authors:\n");
+			while(r.next()) {
+				out.append(String.format("\t%d - %s %s\n\tBook/s written:\n%s\n", 
+						r.getInt("authorid"), r.getString("name").trim(), r.getString("surname").trim(), booksWritten(r.getInt("authorid"))));
+			}
+			return out.toString();
+		} catch (SQLException e) {
+			showExceptionDialog(String.format("There was an error executing the query: %s", e.toString()));
+			return "Database error.";
+		}
 	}
 
 	public String showCustomer(int customerID) {
