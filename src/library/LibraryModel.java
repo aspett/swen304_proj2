@@ -96,9 +96,15 @@ public class LibraryModel {
 		try {
 			r = query(String.format("SELECT * FROM author WHERE authorid = %d", authorID));
 			StringBuilder out = new StringBuilder("Show Author:\n");
+			boolean any = false;
 			while(r.next()) {
+				any = true;
 				out.append(String.format("\t%d - %s %s\n\tBook/s written:\n%s\n", 
 						r.getInt("authorid"), r.getString("name").trim(), r.getString("surname").trim(), booksWritten(r.getInt("authorid"))));
+			}
+			if(!any) {
+				showNoticeDialog("No author found with that ID");
+				return "";
 			}
 			return out.toString();
 		} catch (SQLException e) {
