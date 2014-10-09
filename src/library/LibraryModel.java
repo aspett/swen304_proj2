@@ -39,7 +39,13 @@ public class LibraryModel {
 	public String bookLookup(int isbn) {
 		ResultSet r = null;
 		try {
-			r = query(String.format("SELECT * FROM book WHERE isbn = '%d'", isbn));
+			r = query(String.format("SELECT book.isbn, title, edition_no, numofcop, numleft, string_agg(author.surname, ', ') as authors " +
+					"FROM book " +
+					"LEFT OUTER JOIN book_author ON (book.isbn = book_author.isbn) " +
+					"LEFT OUTER JOIN author ON (book_author.authorid = author.authorid) " +
+					"WHERE book.isbn = %d " +
+					"GROUP BY book.isbn " +
+					"ORDER BY book.isbn", isbn));
 			r.next();
 			return bookLookupFormat(r);
 			
@@ -51,31 +57,24 @@ public class LibraryModel {
 	
 	private String bookLookupFormat(ResultSet r) throws SQLException {
 		StringBuilder out = new StringBuilder("Book lookup:\n");
-		out.append(String.format("\t%d: %s\nEdition %d - Copies: %d (%d left)\n\t",
+		out.append(String.format("\t%d: %s\n\tEdition %d - Copies: %d (%d left)\n\t",
 				r.getInt("isbn"), r.getString("title").trim(), r.getInt("edition_no"), r.getInt("numofcop"), r.getInt("numleft")));
 		
-		out.append("\t" + getAuthors(r.getInt("isbn")));
+		String authors = r.getString("authors");
+		out.append(authors != null && authors.trim().length() > 0 ? "Authors: " + authors : "No authors.");
 
 		return out.toString();
-	}
-	
-	private String getAuthors(int isbn) throws SQLException {
-		ResultSet ar = query(String.format("SELECT a.name, a.surname FROM book_author b, author a WHERE b.isbn = '%d' AND a.authorid = b.authorid", isbn));
-		StringBuilder authors = new StringBuilder("Author/s: ");
-		
-		boolean auth = false; //Any authors?
-		while(ar.next()) {
-			authors.append(String.format("%s%s", (auth ? ", " : ""), ar.getString("surname").trim()));
-			auth = true;
-		}
-		
-		return (auth ? authors.toString() : "No authors.");
 	}
 
 	public String showCatalogue() {
 		ResultSet r = null;
 		try {
-			r = query("SELECT * FROM book");
+			r = query(String.format("SELECT book.isbn, title, edition_no, numofcop, numleft, string_agg(author.surname, ', ') as authors " +
+					"FROM book " +
+					"LEFT OUTER JOIN book_author ON (book.isbn = book_author.isbn) " +
+					"LEFT OUTER JOIN author ON (book_author.authorid = author.authorid) " +
+					"GROUP BY book.isbn " +
+					"ORDER BY book.isbn"));
 			StringBuilder out = new StringBuilder("Catalogue:\n");
 			while(r.next()) {
 				out.append(String.format("%s\n\n", bookLookupFormat(r)));
@@ -94,14 +93,14 @@ public class LibraryModel {
 	public String showAuthor(int authorID) {
 		ResultSet r = null;
 		try {
-			r = query(String.format("SELECT * FROM author WHERE authorid = %d", authorID));
+			r = query(String.format("SELECT author.authorid, author.name, author.surname, string_agg(book.isbn::varchar || ': ' || book.title || ' (Ed. ' || book.edition_no || ')', ', ') as books " +
+					"FROM author " +
+					"LEFT OUTER JOIN book_author ON (book_author.authorid = author.authorid) " +
+					"LEFT OUTER JOIN book ON (book.isbn = book_author.isbn) " +
+					"WHERE author.authorid = %d" +
+					"GROUP BY author.authorid", authorID));
 			StringBuilder out = new StringBuilder("Show Author:\n");
-			boolean any = false;
-			while(r.next()) {
-				any = true;
-				out.append(String.format("\t%d - %s %s\n\tBook/s written:\n%s\n", 
-						r.getInt("authorid"), r.getString("name").trim(), r.getString("surname").trim(), booksWritten(r.getInt("authorid"))));
-			}
+			boolean any = printAuthors(r, out);
 			if(!any) {
 				showNoticeDialog("No author found with that ID");
 				return "";
@@ -113,27 +112,42 @@ public class LibraryModel {
 		}
 	}
 	
-	private String booksWritten(int authorID) throws SQLException {
-		ResultSet r = null;
-		StringBuilder out = new StringBuilder();
+	private boolean printAuthors(ResultSet r, StringBuilder out) throws SQLException {
 		boolean any = false;
-		r = query(String.format("SELECT isbn, title, edition_no FROM book NATURAL JOIN book_author WHERE authorid = %d", authorID));
 		while(r.next()) {
 			any = true;
-			out.append(String.format("\t\t%d - %s (Ed. %d)\n", r.getInt(1), r.getString(2).trim(), r.getInt(3)));
+			out.append(String.format("\t%d - %s %s\n\tBooks written:\n", 
+					r.getInt("authorid"), r.getString("name").trim(), r.getString("surname").trim()));
+			String books = r.getString("books");
+			if(books != null) {
+				String[] booksarr = books.split(", ");
+				for(String s : booksarr) {
+					out.append("\t\t" + s + "\n");
+				}
+			} else {
+				out.append("\t\tNone\n");
+			}
+			out.append("\n");
 		}
-		return any ? out.toString() : "\t\tNone";
+		return any;
 	}
 
 	public String showAllAuthors() {
 		ResultSet r = null;
 		try {
-			r = query("SELECT * FROM author");
+			r = query("SELECT author.authorid, author.name, author.surname, string_agg(book.isbn::varchar || ': ' || book.title || ' (Ed. ' || book.edition_no || ')', ', ') as books " +
+					"FROM author " +
+					"LEFT OUTER JOIN book_author ON (book_author.authorid = author.authorid) " +
+					"LEFT OUTER JOIN book ON (book.isbn = book_author.isbn) " +
+					"GROUP BY author.authorid " +
+					"ORDER BY author.authorid");
 			StringBuilder out = new StringBuilder("Show All Authors:\n");
-			while(r.next()) {
-				out.append(String.format("\t%d - %s %s\n\tBook/s written:\n%s\n", 
-						r.getInt("authorid"), r.getString("name").trim(), r.getString("surname").trim(), booksWritten(r.getInt("authorid"))));
+			boolean any = printAuthors(r, out);
+			if(!any) {
+				showNoticeDialog("There are no authors in the database.");
+				return "";
 			}
+			
 			return out.toString();
 		} catch (SQLException e) {
 			showExceptionDialog(String.format("There was an error executing the query: %s", e.toString()));
@@ -142,15 +156,73 @@ public class LibraryModel {
 	}
 
 	public String showCustomer(int customerID) {
-		return "Show Customer Stub";
+		ResultSet r = null;
+		try {
+			r = query(String.format("SELECT customer.customerid, customer.l_name, customer.f_name, customer.city, string_agg(book.isbn::varchar, ', ') as loaned_books " +
+					"FROM customer " +
+					"LEFT OUTER JOIN cust_book ON (cust_book.customerid = customer.customerid) " +
+					"LEFT OUTER JOIN book ON (cust_book.isbn = book.isbn) " +
+					"WHERE customer.customerid = %d" +
+					"GROUP BY customer.customerid " +
+					"ORDER BY customer.customerid", customerID));
+			StringBuilder out = new StringBuilder("Show Customer:\n");
+			boolean any = printCustomers(r, out, true);
+			if(!any) {
+				showNoticeDialog("No customer with given ID");
+				return "";
+			}
+			return out.toString();
+		} catch (SQLException e) {
+			showExceptionDialog(String.format("There was an error executing the query: %s", e.toString()));
+			return "Database error.";
+		}
+	}
+	
+	private boolean printCustomers(ResultSet r, StringBuilder out, boolean showBooks) throws SQLException {
+		boolean any = false;
+		while(r.next()) {
+			any = true;
+			out.append(String.format("\t%d: %s, %s - %s\n", 
+					r.getInt("customerid"), r.getString("l_name").trim(), trimOrNull(r.getString("f_name"), ""), trimOrNull(r.getString("city"), "(no city)")));
+			if(showBooks) {
+				out.append("\tBooks borrowed:\n");
+				String loaned_books = r.getString("loaned_books");
+				if(loaned_books != null) {
+					String[] lbarr = loaned_books.split(", ");
+					for(String s : lbarr) {
+						out.append("\t\t" + s + "\n");
+					}
+				} else {
+					out.append("\t\tNone.\n");
+				}
+			}
+		}
+		return any;
 	}
 
 	public String showAllCustomers() {
-		return "Show All Customers Stub";
+		ResultSet r = null;
+		try {
+			r = query(String.format("SELECT customer.customerid, customer.l_name, customer.f_name, customer.city, string_agg(book.isbn::varchar, ', ') as loaned_books " +
+					"FROM customer " +
+					"LEFT OUTER JOIN cust_book ON (cust_book.customerid = customer.customerid) " +
+					"LEFT OUTER JOIN book ON (cust_book.isbn = book.isbn) " +
+					"GROUP BY customer.customerid " +
+					"ORDER BY customer.customerid"));
+			StringBuilder out = new StringBuilder("Show Customer:\n");
+			boolean any = printCustomers(r, out, false);
+			if(!any) {
+				showNoticeDialog("No customers found");
+				return "";
+			}
+			return out.toString();
+		} catch (SQLException e) {
+			showExceptionDialog(String.format("There was an error executing the query: %s", e.toString()));
+			return "Database error.";
+		}
 	}
 
-	public String borrowBook(int isbn, int customerID,
-			int day, int month, int year) {
+	public String borrowBook(int isbn, int customerID, int day, int month, int year) {
 		return "Borrow Book Stub";
 	}
 
@@ -208,5 +280,11 @@ public class LibraryModel {
 	
 	private void exit() {
 		System.exit(0);
+	}
+	
+	private String trimOrNull(String str, String defau) {
+		if(str == null)
+			return defau;
+		else return str.trim();
 	}
 }
