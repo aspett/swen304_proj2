@@ -401,7 +401,7 @@ public class LibraryUI extends JFrame {
 	public void actionPerformed(ActionEvent e) {
 	    try {
 		doAction();
-	    } catch(Exception ex) {  showExceptionDialog(ex);  }
+	    } catch(Exception ex) {  ex.printStackTrace(); showExceptionDialog(ex);  }
 	}
 	/** Subclasses implement this for their behaviour */
 	protected abstract void doAction();

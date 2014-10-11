@@ -12,9 +12,11 @@ import static javax.swing.JOptionPane.showMessageDialog;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.regex.Pattern;
 
 import javax.swing.JFrame;
 import javax.swing.JOptionPane;
@@ -30,6 +32,7 @@ public class LibraryModel {
 		try {
 			Class.forName("org.postgresql.Driver");
 			con = DriverManager.getConnection("jdbc:postgresql://localhost:5432/pettandr_jdbc", "andrew", "123456");
+			con.setTransactionIsolation(Connection.TRANSACTION_REPEATABLE_READ);
 		} catch (SQLException | ClassNotFoundException e) {
 			showExceptionDialog(e);
 			exit();
@@ -50,8 +53,8 @@ public class LibraryModel {
 			return bookLookupFormat(r);
 			
 		} catch (SQLException e) {
-			showExceptionDialog(String.format("There was an error executing the query: %s", e.toString()));
-			return "Database error.";
+			showExceptionDialog(String.format("There was an error executing the query: %s", e.getMessage()));
+			return databaseError();
 		}
 	}
 	
@@ -81,8 +84,8 @@ public class LibraryModel {
 			}
 			return out.toString();
 		} catch (SQLException e) {
-			showExceptionDialog(String.format("There was an error executing the query: %s", e.toString()));
-			return "Database error.";
+			showExceptionDialog(String.format("There was an error executing the query: %s", e.getMessage()));
+			return databaseError();
 		}
 	}
 
@@ -107,8 +110,8 @@ public class LibraryModel {
 			}
 			return out.toString();
 		} catch (SQLException e) {
-			showExceptionDialog(String.format("There was an error executing the query: %s", e.toString()));
-			return "Database error.";
+			showExceptionDialog(String.format("There was an error executing the query: %s", e.getMessage()));
+			return databaseError();
 		}
 	}
 	
@@ -150,8 +153,8 @@ public class LibraryModel {
 			
 			return out.toString();
 		} catch (SQLException e) {
-			showExceptionDialog(String.format("There was an error executing the query: %s", e.toString()));
-			return "Database error.";
+			showExceptionDialog(String.format("There was an error executing the query: %s", e.getMessage()));
+			return databaseError();
 		}
 	}
 
@@ -173,8 +176,8 @@ public class LibraryModel {
 			}
 			return out.toString();
 		} catch (SQLException e) {
-			showExceptionDialog(String.format("There was an error executing the query: %s", e.toString()));
-			return "Database error.";
+			showExceptionDialog(String.format("There was an error executing the query: %s", e.getMessage()));
+			return databaseError();
 		}
 	}
 	
@@ -218,12 +221,66 @@ public class LibraryModel {
 			return out.toString();
 		} catch (SQLException e) {
 			showExceptionDialog(String.format("There was an error executing the query: %s", e.toString()));
-			return "Database error.";
+			return databaseError();
 		}
 	}
 
 	public String borrowBook(int isbn, int customerID, int day, int month, int year) {
-		return "Borrow Book Stub";
+		try {
+			try {
+				con.setAutoCommit(false);
+				ResultSet customer = query(String.format("SELECT * FROM customer WHERE customerid = %d FOR UPDATE", customerID));
+				if(!customer.next())
+					throw new RuntimeException("Customer does not exist");
+				
+				ResultSet book = query(String.format("SELECT * FROM book WHERE isbn = %d FOR UPDATE", isbn));
+				if(!book.next())
+					throw new RuntimeException("Book does not exist");
+				
+				int numcopies = book.getInt("numleft");
+				if(numcopies <= 0)
+					throw new RuntimeException("There are no copies left of this book");
+				
+				PreparedStatement cust_book = con.prepareStatement("INSERT INTO cust_book VALUES(?, ?, ?)");
+				cust_book.setInt(1, isbn);
+				java.sql.Date date = java.sql.Date.valueOf(String.format("%d-%s-%s", year, month >= 10 ? String.valueOf(month) : "0" + month,
+						day >= 10 ? String.valueOf(day) : "0" + day));
+				cust_book.setDate(2, date);
+				cust_book.setInt(3, customerID);
+				
+				int ret = cust_book.executeUpdate();
+				
+				showNoticeDialog("The customer and book records have been locked. Hit OK to proceed.");
+				
+				int ret2 = update(String.format("UPDATE book SET numleft = numleft - 1 WHERE isbn = %d", isbn));
+				
+				con.commit();
+				
+				return String.format("Borrow Book:\n\tBook: %d (%s)\n\tLoaned to: %d (%s, %s)\n\tDue Date: %s",
+						isbn, trimOrNull(book.getString("title"), ""), customerID, trimOrNull(customer.getString("l_name"), ""), trimOrNull(customer.getString("f_name"), ""), date.toString());
+				
+				
+			} catch(RuntimeException e) {
+				con.rollback();
+				showExceptionDialog(e.getMessage());
+				return "Borrow book:\n\t" + e.getMessage();
+			} catch(SQLException e) {
+				con.rollback();
+				throw e;
+			} finally {
+				con.setAutoCommit(true);
+			}
+		} catch(SQLException e) {
+			if(e.getMessage().replaceAll("\\s+", "").matches("(.*)cust_book_pkey(.*)")) {
+				showExceptionDialog("That customer already has this book on loan.");
+				return "Borrow book:\n\tThat customer already has this book on loan.";
+			}
+			else {
+				showExceptionDialog("There has been a database error. All actions have been reversed.");
+				System.out.println("===========================\nDatabase error:\n"+e.getMessage()+"\n===========================");
+				return "Borrow book:\n\tThere has been a database error. All actions have been reversed.";
+			}
+		}
 	}
 
 	public String returnBook(int isbn, int customerid) {
@@ -239,7 +296,13 @@ public class LibraryModel {
 	}
 
 	public String deleteCus(int customerID) {
-		return "Delete Customer";
+		try {
+			ResultSet r = query(String.format("DELETE FROM customer WHERE customerid = %d", customerID));
+			return "Customer deleted.";
+		} catch(SQLException e) {
+			showExceptionDialog(String.format("Could not delete the customer: %s", e.getMessage()));
+			return "";
+		}
 	}
 
 	public String deleteAuthor(int authorID) {
@@ -286,5 +349,9 @@ public class LibraryModel {
 		if(str == null)
 			return defau;
 		else return str.trim();
+	}
+	
+	private String databaseError() {
+		return String.format("====================\nThere was a database error.\nNo actions have been committed.\n====================");'
 	}
 }
