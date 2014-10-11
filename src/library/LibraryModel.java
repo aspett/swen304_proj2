@@ -161,7 +161,7 @@ public class LibraryModel {
 	public String showCustomer(int customerID) {
 		ResultSet r = null;
 		try {
-			r = query(String.format("SELECT customer.customerid, customer.l_name, customer.f_name, customer.city, string_agg(book.isbn::varchar, ', ') as loaned_books " +
+			r = query(String.format("SELECT customer.customerid, customer.l_name, customer.f_name, customer.city, string_agg(book.isbn || ' - f[Due: ' || cust_book.duedate || ']' || ' - ' || book.title || ' (Ed. ' || book.edition_no || ')', ', ') as loaned_books " +
 					"FROM customer " +
 					"LEFT OUTER JOIN cust_book ON (cust_book.customerid = customer.customerid) " +
 					"LEFT OUTER JOIN book ON (cust_book.isbn = book.isbn) " +
@@ -206,11 +206,8 @@ public class LibraryModel {
 	public String showAllCustomers() {
 		ResultSet r = null;
 		try {
-			r = query(String.format("SELECT customer.customerid, customer.l_name, customer.f_name, customer.city, string_agg(book.isbn::varchar, ', ') as loaned_books " +
+			r = query(String.format("SELECT customer.customerid, customer.l_name, customer.f_name, customer.city " +
 					"FROM customer " +
-					"LEFT OUTER JOIN cust_book ON (cust_book.customerid = customer.customerid) " +
-					"LEFT OUTER JOIN book ON (cust_book.isbn = book.isbn) " +
-					"GROUP BY customer.customerid " +
 					"ORDER BY customer.customerid"));
 			StringBuilder out = new StringBuilder("Show Customer:\n");
 			boolean any = printCustomers(r, out, false);
@@ -352,6 +349,6 @@ public class LibraryModel {
 	}
 	
 	private String databaseError() {
-		return String.format("====================\nThere was a database error.\nNo actions have been committed.\n====================");'
+		return String.format("====================\nThere was a database error.\nNo actions have been committed.\n====================");
 	}
 }
