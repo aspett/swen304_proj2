@@ -16,7 +16,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.util.regex.Pattern;
+import java.util.Date;
 
 import javax.swing.JFrame;
 import javax.swing.JOptionPane;
@@ -90,7 +90,34 @@ public class LibraryModel {
 	}
 
 	public String showLoanedBooks() {
-		return "stub";
+		ResultSet r = null;
+		try {			
+			r = query(String.format("SELECT book.isbn, book.title, book.edition_no, book.numofcop, book.numleft, string_agg(customer.customerid || ' - ' || customer.l_name || ', ' || customer.f_name, ';') as customers " +
+					"FROM book " +
+					"NATURAL JOIN cust_book " +
+					"LEFT OUTER JOIN customer ON (cust_book.customerid = customer.customerid) " +
+					"GROUP BY book.isbn"));
+			StringBuilder out = new StringBuilder("Show Loaned Books:\n");
+			boolean any = false;
+			
+			while(r.next()) {
+				any = true;
+				out.append(String.format("\t%d - %s (Ed. %d)\n\tNum copies: %d, Num left: %d\n\tCustomers loaned to:\n", r.getInt("isbn"), r.getString("title").trim(), r.getInt("edition_no"), r.getInt("numofcop"), r.getInt("numleft")));
+				String[] custs = r.getString("customers").split(";");
+				for(String c : custs) {
+					out.append(String.format("\t\t%s\n", c));
+				}
+				out.append("\n");
+			}
+			
+			if(!any)
+				out.append("\tNone.\n");
+			
+			return out.toString();
+		} catch (SQLException e) {
+			showExceptionDialog(String.format("There was an error executing the query: %s", e.getMessage()));
+			return databaseError();
+		}
 	}
 
 	public String showAuthor(int authorID) {
@@ -280,8 +307,50 @@ public class LibraryModel {
 		}
 	}
 
-	public String returnBook(int isbn, int customerid) {
-		return "Return Book Stub";
+	public String returnBook(int isbn, int customerID) {
+		try {
+			try {
+				con.setAutoCommit(false);
+				ResultSet customer = query(String.format("SELECT * FROM customer WHERE customerid = %d FOR UPDATE", customerID));
+				if(!customer.next())
+					throw new RuntimeException("Customer does not exist");
+				
+				ResultSet book = query(String.format("SELECT * FROM book WHERE isbn = %d FOR UPDATE", isbn));
+				if(!book.next())
+					throw new RuntimeException("Book does not exist");
+				
+				ResultSet cust_book = query(String.format("SELECT * FROM cust_book WHERE isbn = %d AND customerid = %d FOR UPDATE", isbn, customerID));
+				if(!cust_book.next())
+					throw new RuntimeException("The customer does not have this book on loan.");
+				
+				showNoticeDialog("The customer and book records have been locked. Hit OK to proceed.");
+				
+				int delete = update(String.format("DELETE FROM cust_book WHERE isbn = %d AND customerid = %d", isbn, customerID));
+				
+				int ret2 = update(String.format("UPDATE book SET numleft = numleft + 1 WHERE isbn = %d", isbn));
+				
+				con.commit();
+				
+				return String.format("Return Book:\n\tBook: %d (%s)\n\tLoaned to: %d (%s, %s)\n\tOverdue?: %s",
+						isbn, trimOrNull(book.getString("title"), ""), customerID, trimOrNull(customer.getString("l_name"), ""), trimOrNull(customer.getString("f_name"), ""),
+						cust_book.getDate("duedate").compareTo(new Date()) > 0 ? "Yes" : "No");
+				
+				
+			} catch(RuntimeException e) {
+				con.rollback();
+				showExceptionDialog(e.getMessage());
+				return "Return book:\n\t" + e.getMessage();
+			} catch(SQLException e) {
+				con.rollback();
+				throw e;
+			} finally {
+				con.setAutoCommit(true);
+			}
+		} catch(SQLException e) {
+			showExceptionDialog("There has been a database error. All actions have been reversed.");
+			System.out.println("===========================\nDatabase error:\n"+e.getMessage()+"\n===========================");
+			return "Return book:\n\tThere has been a database error. All actions have been reversed.";
+		}
 	}
 
 	public void closeDBConnection() {
@@ -324,7 +393,7 @@ public class LibraryModel {
 	private void showNoticeDialog(String s) {
 		showMessageDialog(dialogParent,
 				s,
-				"Error performing action",
+				"Information",
 				JOptionPane.INFORMATION_MESSAGE);
 	}
 	
