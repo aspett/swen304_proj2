@@ -1,11 +1,4 @@
-package main;
-/*
- * LibraryUI.java former Comp302.java
- *
- * Created on March 6, 2003, 2:52 PM with netbeans
- * 
- * Updated on March 25 2005 by Jerome Dolman
- */
+
 
 import java.awt.*;
 import java.awt.event.ActionEvent;

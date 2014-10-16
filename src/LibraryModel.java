@@ -1,4 +1,3 @@
-package library;
 /*
  * LibraryModel.java
  * Author:
@@ -31,7 +30,7 @@ public class LibraryModel {
 		dialogParent = parent;
 		try {
 			Class.forName("org.postgresql.Driver");
-			con = DriverManager.getConnection("jdbc:postgresql://localhost:5432/pettandr_jdbc", "andrew", "123456");
+			con = DriverManager.getConnection("jdbc:postgresql://db.ecs.vuw.ac.nz:5432/pettandr_jdbc", "pettandr", "123456");
 			con.setTransactionIsolation(Connection.TRANSACTION_REPEATABLE_READ);
 		} catch (SQLException | ClassNotFoundException e) {
 			showExceptionDialog(e);
@@ -42,27 +41,31 @@ public class LibraryModel {
 	public String bookLookup(int isbn) {
 		ResultSet r = null;
 		try {
-			r = query(String.format("SELECT book.isbn, title, edition_no, numofcop, numleft, string_agg(author.surname, ', ') as authors " +
+			r = query(String.format("SELECT book.isbn, title, edition_no, numofcop, numleft, string_agg(author.surname, ', ' ORDER BY book_author.authorseqno) as authors " +
 					"FROM book " +
 					"LEFT OUTER JOIN book_author ON (book.isbn = book_author.isbn) " +
 					"LEFT OUTER JOIN author ON (book_author.authorid = author.authorid) " +
 					"WHERE book.isbn = %d " +
 					"GROUP BY book.isbn " +
 					"ORDER BY book.isbn", isbn));
-			r.next();
-			return bookLookupFormat(r);
-			
+			if(r.next())
+				return bookLookupFormat(r);
+			else {
+				showNoticeDialog("There is no book with that ISBN");
+				return "Book lookup:\n\tThere is no book with that ISBN";
+			}
+
 		} catch (SQLException e) {
 			showExceptionDialog(String.format("There was an error executing the query: %s", e.getMessage()));
 			return databaseError();
 		}
 	}
-	
+
 	private String bookLookupFormat(ResultSet r) throws SQLException {
 		StringBuilder out = new StringBuilder("Book lookup:\n");
 		out.append(String.format("\t%d: %s\n\tEdition %d - Copies: %d (%d left)\n\t",
 				r.getInt("isbn"), r.getString("title").trim(), r.getInt("edition_no"), r.getInt("numofcop"), r.getInt("numleft")));
-		
+
 		String authors = r.getString("authors");
 		out.append(authors != null && authors.trim().length() > 0 ? "Authors: " + authors : "No authors.");
 
@@ -72,7 +75,7 @@ public class LibraryModel {
 	public String showCatalogue() {
 		ResultSet r = null;
 		try {
-			r = query(String.format("SELECT book.isbn, title, edition_no, numofcop, numleft, string_agg(author.surname, ', ') as authors " +
+			r = query(String.format("SELECT book.isbn, title, edition_no, numofcop, numleft, string_agg(author.surname, ', ' ORDER BY book_author.authorseqno) as authors " +
 					"FROM book " +
 					"LEFT OUTER JOIN book_author ON (book.isbn = book_author.isbn) " +
 					"LEFT OUTER JOIN author ON (book_author.authorid = author.authorid) " +
@@ -91,7 +94,7 @@ public class LibraryModel {
 
 	public String showLoanedBooks() {
 		ResultSet r = null;
-		try {			
+		try {
 			r = query(String.format("SELECT book.isbn, book.title, book.edition_no, book.numofcop, book.numleft, string_agg(customer.customerid || ' - ' || customer.l_name || ', ' || customer.f_name, ';') as customers " +
 					"FROM book " +
 					"NATURAL JOIN cust_book " +
@@ -99,7 +102,7 @@ public class LibraryModel {
 					"GROUP BY book.isbn"));
 			StringBuilder out = new StringBuilder("Show Loaned Books:\n");
 			boolean any = false;
-			
+
 			while(r.next()) {
 				any = true;
 				out.append(String.format("\t%d - %s (Ed. %d)\n\tNum copies: %d, Num left: %d\n\tCustomers loaned to:\n", r.getInt("isbn"), r.getString("title").trim(), r.getInt("edition_no"), r.getInt("numofcop"), r.getInt("numleft")));
@@ -109,10 +112,10 @@ public class LibraryModel {
 				}
 				out.append("\n");
 			}
-			
+
 			if(!any)
 				out.append("\tNone.\n");
-			
+
 			return out.toString();
 		} catch (SQLException e) {
 			showExceptionDialog(String.format("There was an error executing the query: %s", e.getMessage()));
@@ -141,12 +144,12 @@ public class LibraryModel {
 			return databaseError();
 		}
 	}
-	
+
 	private boolean printAuthors(ResultSet r, StringBuilder out) throws SQLException {
 		boolean any = false;
 		while(r.next()) {
 			any = true;
-			out.append(String.format("\t%d - %s %s\n\tBooks written:\n", 
+			out.append(String.format("\t%d - %s %s\n\tBooks written:\n",
 					r.getInt("authorid"), r.getString("name").trim(), r.getString("surname").trim()));
 			String books = r.getString("books");
 			if(books != null) {
@@ -177,7 +180,7 @@ public class LibraryModel {
 				showNoticeDialog("There are no authors in the database.");
 				return "";
 			}
-			
+
 			return out.toString();
 		} catch (SQLException e) {
 			showExceptionDialog(String.format("There was an error executing the query: %s", e.getMessage()));
@@ -207,12 +210,12 @@ public class LibraryModel {
 			return databaseError();
 		}
 	}
-	
+
 	private boolean printCustomers(ResultSet r, StringBuilder out, boolean showBooks) throws SQLException {
 		boolean any = false;
 		while(r.next()) {
 			any = true;
-			out.append(String.format("\t%d: %s, %s - %s\n", 
+			out.append(String.format("\t%d: %s, %s - %s\n",
 					r.getInt("customerid"), r.getString("l_name").trim(), trimOrNull(r.getString("f_name"), ""), trimOrNull(r.getString("city"), "(no city)")));
 			if(showBooks) {
 				out.append("\tBooks borrowed:\n");
@@ -250,40 +253,40 @@ public class LibraryModel {
 	}
 
 	public String borrowBook(int isbn, int customerID, int day, int month, int year) {
-		try {
+		try { //Double wrap so that we can catch SQLExceptions from rollback/setAutoCommit
 			try {
 				con.setAutoCommit(false);
 				ResultSet customer = query(String.format("SELECT * FROM customer WHERE customerid = %d FOR UPDATE", customerID));
 				if(!customer.next())
 					throw new RuntimeException("Customer does not exist");
-				
+
 				ResultSet book = query(String.format("SELECT * FROM book WHERE isbn = %d FOR UPDATE", isbn));
 				if(!book.next())
 					throw new RuntimeException("Book does not exist");
-				
+
 				int numcopies = book.getInt("numleft");
 				if(numcopies <= 0)
 					throw new RuntimeException("There are no copies left of this book");
-				
+
 				PreparedStatement cust_book = con.prepareStatement("INSERT INTO cust_book VALUES(?, ?, ?)");
 				cust_book.setInt(1, isbn);
 				java.sql.Date date = java.sql.Date.valueOf(String.format("%d-%s-%s", year, month >= 10 ? String.valueOf(month) : "0" + month,
 						day >= 10 ? String.valueOf(day) : "0" + day));
 				cust_book.setDate(2, date);
 				cust_book.setInt(3, customerID);
-				
+
 				int ret = cust_book.executeUpdate();
-				
+
 				showNoticeDialog("The customer and book records have been locked. Hit OK to proceed.");
-				
+
 				int ret2 = update(String.format("UPDATE book SET numleft = numleft - 1 WHERE isbn = %d", isbn));
-				
+
 				con.commit();
-				
+
 				return String.format("Borrow Book:\n\tBook: %d (%s)\n\tLoaned to: %d (%s, %s)\n\tDue Date: %s",
 						isbn, trimOrNull(book.getString("title"), ""), customerID, trimOrNull(customer.getString("l_name"), ""), trimOrNull(customer.getString("f_name"), ""), date.toString());
-				
-				
+
+
 			} catch(RuntimeException e) {
 				con.rollback();
 				showExceptionDialog(e.getMessage());
@@ -308,34 +311,34 @@ public class LibraryModel {
 	}
 
 	public String returnBook(int isbn, int customerID) {
-		try {
+		try { //Double wrap so that we can catch SQLExceptions from rollback/setAutoCommit
 			try {
 				con.setAutoCommit(false);
 				ResultSet customer = query(String.format("SELECT * FROM customer WHERE customerid = %d FOR UPDATE", customerID));
 				if(!customer.next())
 					throw new RuntimeException("Customer does not exist");
-				
+
 				ResultSet book = query(String.format("SELECT * FROM book WHERE isbn = %d FOR UPDATE", isbn));
 				if(!book.next())
 					throw new RuntimeException("Book does not exist");
-				
+
 				ResultSet cust_book = query(String.format("SELECT * FROM cust_book WHERE isbn = %d AND customerid = %d FOR UPDATE", isbn, customerID));
 				if(!cust_book.next())
 					throw new RuntimeException("The customer does not have this book on loan.");
-				
+
 				showNoticeDialog("The customer and book records have been locked. Hit OK to proceed.");
-				
+
 				int delete = update(String.format("DELETE FROM cust_book WHERE isbn = %d AND customerid = %d", isbn, customerID));
-				
+
 				int ret2 = update(String.format("UPDATE book SET numleft = numleft + 1 WHERE isbn = %d", isbn));
-				
+
 				con.commit();
-				
+
 				return String.format("Return Book:\n\tBook: %d (%s)\n\tLoaned to: %d (%s, %s)\n\tOverdue?: %s",
 						isbn, trimOrNull(book.getString("title"), ""), customerID, trimOrNull(customer.getString("l_name"), ""), trimOrNull(customer.getString("f_name"), ""),
 						cust_book.getDate("duedate").compareTo(new Date()) > 0 ? "Yes" : "No");
-				
-				
+
+
 			} catch(RuntimeException e) {
 				con.rollback();
 				showExceptionDialog(e.getMessage());
@@ -362,61 +365,163 @@ public class LibraryModel {
 	}
 
 	public String deleteCus(int customerID) {
+		// Delete customer, delete cust_book, update books. (Don't delete if there are loans!)
 		try {
-			ResultSet r = query(String.format("DELETE FROM customer WHERE customerid = %d", customerID));
-			return "Customer deleted.";
+			try {
+				con.setAutoCommit(false);
+				ResultSet customer = query(String.format("SELECT * FROM customer WHERE customerid = %d FOR UPDATE", customerID));
+				if(!customer.next())
+					throw new RuntimeException("Customer does not exist");
+
+				ResultSet cust_book = query(String.format("SELECT * FROM cust_book WHERE customerid = %d FOR UPDATE", customerID));
+				if(cust_book.next())
+					throw new RuntimeException("Customer still has loans - can not be removed.");
+
+				int cust_result = update(String.format("DELETE FROM customer WHERE customerid = %d", customerID));
+				if(cust_result == 0)
+					throw new RuntimeException("There was an error removing the customer.");
+
+				con.commit();
+
+				return "Customer deleted.";
+			}
+			catch(RuntimeException e) {
+				con.rollback();
+				showExceptionDialog(String.format("Could not delete the customer: %s", e.getMessage()));
+				return "Delete customer: " + e.getMessage();
+			}
+			catch(SQLException e) {
+				con.rollback();
+				throw e;
+			} finally {
+				con.setAutoCommit(true);
+			}
 		} catch(SQLException e) {
-			showExceptionDialog(String.format("Could not delete the customer: %s", e.getMessage()));
-			return "";
+			showExceptionDialog("There has been a database error. All actions have been reversed.");
+			System.out.println("===========================\nDatabase error:\n"+e.getMessage()+"\n===========================");
+			return "Return book:\n\tThere has been a database error. All actions have been reversed.";
 		}
 	}
 
 	public String deleteAuthor(int authorID) {
-		return "Delete Author";
+		// Delete author, delete book_author, update authorseqno's.
+		try {
+			try {
+				con.setAutoCommit(false);
+				ResultSet author = query(String.format("SELECT * FROM author WHERE authorid = %d FOR UPDATE", authorID));
+				if(!author.next())
+					throw new RuntimeException("No author with that ID found.");
+
+				ResultSet book_author = query(String.format("SELECT * FROM book_author WHERE authorid = %d FOR UPDATE", authorID));
+				while(book_author.next()) {
+					int seqno = book_author.getInt("authorseqno");
+					int isbn = book_author.getInt("isbn");
+					update(String.format("UPDATE book_author SET authorseqno = authorseqno - 1 WHERE isbn = %d AND authorseqno > %d", isbn,seqno));
+					int result = update(String.format("DELETE FROM book_author WHERE isbn = %d AND authorid = %d", isbn, authorID));
+					if(result == 0)
+						throw new RuntimeException("There was an error removing the author from books.");
+				}
+
+				int author_result = update(String.format("DELETE FROM author WHERE authorid = %d", authorID));
+				if(author_result == 0)
+					throw new RuntimeException("There was an error removing the author!");
+
+				con.commit();
+
+				return "Delete author:\n\tAuthor id " + authorID + " was deleted.";
+			} catch(RuntimeException e) {
+				con.rollback();
+				showNoticeDialog(e.getMessage());
+				return "Delete author:\n\t" + e.getMessage();
+			} catch(SQLException e) {
+				con.rollback();
+				throw e;
+			} finally {
+				con.setAutoCommit(true);
+			}
+		} catch(SQLException e) {
+			showExceptionDialog("There has been a database error. All actions have been reversed.");
+			System.out.println("===========================\nDatabase error:\n"+e.getMessage()+"\n===========================");
+			return "Delete author:\n\tThere has been a database error. All actions have been reversed.";
+		}
 	}
 
 	public String deleteBook(int isbn) {
-		return "Delete Book";
+		//Delete book, delete book_authors. (Check cust_book! - don't delete if there are loans)
+		try { //Double wrap so that we can catch SQLExceptions from rollback/setAutoCommit
+			try {
+				con.setAutoCommit(false);
+				ResultSet book = query(String.format("SELECT * FROM book WHERE isbn = %d FOR UPDATE", isbn));
+				if(!book.next())
+					throw new RuntimeException("Book does not exist with ISBN");
+
+				ResultSet cust_book = query(String.format("SELECT * FROM cust_book WHERE isbn = %d", isbn));
+				if(cust_book.next())
+					throw new RuntimeException("There are loans out for this book; it can not be deleted!");
+
+				update(String.format("DELETE FROM book_author WHERE isbn = %d", isbn));
+				int result = update(String.format("DELETE FROM book WHERE isbn = %d", isbn));
+
+				if(result == 0)
+					throw new RuntimeException("There was an error deleting the book");
+
+				con.commit();
+				return "Delete book:\n\tBook with ID " + isbn + " deleted.";
+			} catch(RuntimeException e) {
+				con.rollback();
+				showNoticeDialog(e.getMessage());
+				return "Delete book:\n\t" + e.getMessage();
+			} catch(SQLException e) {
+				con.rollback();
+				throw e;
+			} finally {
+				con.setAutoCommit(true);
+			}
+		} catch(SQLException e) {
+			showExceptionDialog("There has been a database error. All actions have been reversed.");
+			System.out.println("===========================\nDatabase error:\n"+e.getMessage()+"\n===========================");
+			return "Delete book:\n\tThere has been a database error. All actions have been reversed.";
+		}
 	}
-	
+
 	private void showExceptionDialog(Exception e) {
 		showExceptionDialog(e.toString());
 	}
-	
+
 	private void showExceptionDialog(String s) {
 		showMessageDialog(dialogParent,
 				s,
 				"Error performing action",
 				ERROR_MESSAGE);
 	}
-	
+
 	private void showNoticeDialog(String s) {
 		showMessageDialog(dialogParent,
 				s,
 				"Information",
 				JOptionPane.INFORMATION_MESSAGE);
 	}
-	
+
 	private ResultSet query(String query) throws SQLException {
 		Statement st = con.createStatement();
 		return st.executeQuery(query);
 	}
-	
+
 	private int update(String query) throws SQLException {
 		Statement st = con.createStatement();
 		return st.executeUpdate(query);
 	}
-	
+
 	private void exit() {
 		System.exit(0);
 	}
-	
+
 	private String trimOrNull(String str, String defau) {
 		if(str == null)
 			return defau;
 		else return str.trim();
 	}
-	
+
 	private String databaseError() {
 		return String.format("====================\nThere was a database error.\nNo actions have been committed.\n====================");
 	}
